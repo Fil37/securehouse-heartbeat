@@ -1,0 +1,30 @@
+name: harness silence alarm
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the age of the latest encrypted copy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          created=$(python3 -c "import json; print(json.load(open('heartbeat.json'))['last_copy'])")
+          age=$(python3 -c "from datetime import datetime, timezone; import sys; d = datetime.strptime(sys.argv[1], '%Y-%m-%dT%H:%M:%S%z'); print(int((datetime.now(timezone.utc) - d).total_seconds() // 3600))" "$created")
+          echo "latest copy: $created ($age h ago)"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "harness silencieux in:title" --json number --jq '.[0].number')
+          if [ "$age" -ge 30 ]; then
+            if [ -z "$open" ]; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "harness silencieux depuis $age h" --body "@$OWNER Aucun signe de vie depuis $created ($age h) : le PC est peut-être éteint ou en veille, ou harness ne tourne plus. Ce ticket se ferme tout seul au retour du signal."
+            fi
+            exit 1
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --repo "$GITHUB_REPOSITORY" --comment "Une copie récente est revenue ($created) : harness tourne de nouveau."
+          fi
